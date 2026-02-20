@@ -1,0 +1,8 @@
+# Required so FlutterGen (build_runner) can read pubspec.yaml
+targets:
+  $default:
+    sources:
+      include:
+        - pubspec.yaml
+        - lib/**
+        - assets/**

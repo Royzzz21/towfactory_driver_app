@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "env": {
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:${env:PATH}"
+      }
+    },
+    {
+      "name": "Flutter (profile)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "profile",
+      "env": {
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:${env:PATH}"
+      }
+    }
+  ]
+}

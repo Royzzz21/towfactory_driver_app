@@ -1,0 +1,8 @@
+# Launcher icons config. To regenerate icons, run:
+#   flutter pub get && flutter pub run flutter_launcher_icons -f flutter_launcher_icons.yaml
+flutter_launcher_icons:
+  image_path: assets/images/app_logo.png
+  android: true
+  ios: true
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: assets/images/app_logo.png
