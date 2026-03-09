@@ -49,4 +49,9 @@ class BookingRepositoryImpl implements BookingRepository {
   Future<void> cancelBooking(String bookingId) async {
     await _bookingService.cancelBooking(bookingId);
   }
+
+  @override
+  Future<void> saveEta(String bookingId, {String? etaToPickup, String? etaToDropoff}) async {
+    await _bookingService.saveEta(bookingId, etaToPickup: etaToPickup, etaToDropoff: etaToDropoff);
+  }
 }

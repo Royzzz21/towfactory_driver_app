@@ -26,4 +26,7 @@ abstract class BookingRepository {
 
   /// Cancels a booking. Throws [ApiException] on failure.
   Future<void> cancelBooking(String bookingId);
+
+  /// Saves ETA text to the database. Only one of the parameters needs to be provided.
+  Future<void> saveEta(String bookingId, {String? etaToPickup, String? etaToDropoff});
 }

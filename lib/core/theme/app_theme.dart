@@ -10,6 +10,8 @@ class AppTheme {
   ThemeData get lightTheme => ThemeData(
         useMaterial3: true,
         scaffoldBackgroundColor: AppColors.surface,
+        // Roboto fallback ensures ₱ (U+20B1) renders correctly when Poppins lacks the glyph
+        fontFamilyFallback: const ['Roboto'],
         textTheme: AppFontManager.textTheme(ThemeData.light().textTheme),
         colorScheme: const ColorScheme.light(
           primary: AppColors.primary,

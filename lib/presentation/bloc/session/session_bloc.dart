@@ -35,9 +35,16 @@ class SessionBloc extends Bloc<SessionEvent, SessionState> {
     Emitter<SessionState> emit,
   ) async {
     final user = await _sessionRepository.getStoredUser();
-    if (user != null) {
+    if (user == null) {
+      emit(const SessionUnauthenticated());
+      return;
+    }
+    // Validate token against the API — auto-logout if token is invalid/expired.
+    try {
+      await _authRepository.getMe(user.token);
       emit(SessionAuthenticated(user));
-    } else {
+    } catch (_) {
+      await _sessionStorage.clearSession();
       emit(const SessionUnauthenticated());
     }
   }

@@ -46,10 +46,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Connect socket for notifications (no GPS) after login
+    // Connect socket and start GPS tracking immediately after login
     final session = context.read<SessionBloc>().state;
     if (session is SessionAuthenticated) {
-      sl<DriverLocationService>().connect(session.user.id);
+      final locationService = sl<DriverLocationService>();
+      locationService.connect(session.user.id);
+      if (!locationService.isTracking) {
+        locationService.start(session.user.id);
+      }
     }
 
     // Bridge socket notifications → NotificationBloc
@@ -99,11 +103,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         actions: <Widget>[
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () {
-              sl<DriverLocationService>().disconnect();
-              context.read<SessionBloc>().add(const LogoutRequested());
-            },
             tooltip: 'Log out',
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                barrierDismissible: false,
+                builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  title: const Text('Log out?', style: TextStyle(fontWeight: FontWeight.bold)),
+                  content: const Text('Are you sure you want to log out?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                    ),
+                    FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                      onPressed: () => Navigator.of(ctx).pop(true),
+                      child: const Text('Log out'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed == true && context.mounted) {
+                sl<DriverLocationService>().disconnect();
+                context.read<SessionBloc>().add(const LogoutRequested());
+              }
+            },
           ),
         ],
       ),

@@ -28,6 +28,9 @@ abstract final class AppConstraints {
   /// Cancel a booking (PATCH; requires Bearer token).
   static String bookingCancelPath(String bookingId) => '/bookings/$bookingId/cancel';
 
+  /// Save ETA for a booking (PATCH; requires Bearer token).
+  static String bookingEtaPath(String bookingId) => '/bookings/$bookingId/eta';
+
   /// My chats/conversations (GET; requires Bearer token).
   static const String chatsMy = '/chats/my';
 

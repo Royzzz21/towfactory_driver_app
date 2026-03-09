@@ -8,6 +8,9 @@ import '../../../core/theme/colors_manager.dart';
 import '../../../core/theme/font_manager.dart';
 import '../../../domain/entities/booking.dart';
 import '../../../domain/entities/chat.dart';
+import '../../../services/driver_location_service.dart';
+import '../../../services/eta_service.dart';
+import '../../../domain/repositories/booking_repository.dart';
 import '../../../domain/repositories/chat_repository.dart';
 import '../../router/app_router.dart';
 import '../../bloc/booking/booking_bloc.dart';
@@ -31,14 +34,81 @@ class BookingDetailsScreen extends StatefulWidget {
 
 class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
   bool _isCustomerOnline = false;
+  bool _isUpdating = false;
   /// Updated from bloc when status update succeeds and list is refetched.
   Booking? _currentBooking;
+  EtaResult? _eta;
+  bool _etaLoading = false;
+  bool _etaFetched = false;
+  String _etaLabel = 'Estimated Time of Arrival on Pickup';
 
   @override
   void initState() {
     super.initState();
     _currentBooking = widget.booking;
     _checkOnlineStatus();
+    _fetchEta();
+  }
+
+  Future<void> _fetchEta() async {
+    if (_etaLoading) return; // already in-flight, don't fire again
+    final b = booking; // use live booking (updated by BlocListener), not the initial snapshot
+    final status = b.status?.toLowerCase() ?? '';
+
+    String label;
+    String? savedEta;
+    double? destLat;
+    double? destLng;
+
+    if (status == 'confirmed' || status == 'arrived_pickup') {
+      label = 'Estimated Time of Arrival on Pickup';
+      savedEta = b.etaToPickup;
+      destLat = b.pickupLat;
+      destLng = b.pickupLng;
+    } else if (status == 'ongoing') {
+      label = 'Estimated Time of Arrival on Drop-off';
+      savedEta = b.etaToDropoff;
+      destLat = b.dropoffLat;
+      destLng = b.dropoffLng;
+    } else {
+      return;
+    }
+
+    setState(() { _etaLabel = label; });
+
+    // Use saved ETA from DB — no Google Maps call needed
+    if (savedEta != null && savedEta.isNotEmpty) {
+      setState(() {
+        _eta = EtaResult(duration: savedEta!, distance: '');
+        _etaFetched = true;
+      });
+      return;
+    }
+
+    // No saved ETA yet — calculate once and save to DB
+    if (destLat == null || destLng == null) return;
+    setState(() => _etaLoading = true);
+    try {
+      final knownPosition = sl<DriverLocationService>().lastPosition;
+      final result = await EtaService.getEta(
+        destLat: destLat,
+        destLng: destLng,
+        knownPosition: knownPosition,
+      );
+      if (result != null) {
+        // Persist to DB so we never recalculate on next open
+        final etaText = '${result.duration}  ·  ${result.distance}';
+        final isPickupPhase = status == 'confirmed' || status == 'arrived_pickup';
+        sl<BookingRepository>().saveEta(
+          b.id,
+          etaToPickup: isPickupPhase ? etaText : null,
+          etaToDropoff: !isPickupPhase ? etaText : null,
+        ).ignore();
+      }
+      if (mounted) setState(() { _eta = result; _etaLoading = false; _etaFetched = true; });
+    } catch (_) {
+      if (mounted) setState(() { _etaLoading = false; _etaFetched = true; });
+    }
   }
 
   Future<void> _checkOnlineStatus() async {
@@ -91,8 +161,33 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
         if (state is BookingLoaded) {
           final list = state.bookings.where((Booking b) => b.id == widget.booking.id).toList();
           if (list.isNotEmpty && mounted) {
-            setState(() => _currentBooking = list.first);
+            final updated = list.first;
+            final statusChanged = updated.status != (_currentBooking ?? widget.booking).status;
+            setState(() {
+              _currentBooking = updated;
+              _isUpdating = false;
+              if (statusChanged) {
+                _eta = null;
+                _etaLoading = false;
+                _etaFetched = false;
+              }
+            });
+            if (statusChanged) _fetchEta();
           }
+        } else if (state is ArrivedBookingSuccess ||
+            state is StartBookingSuccess ||
+            state is CompleteBookingSuccess ||
+            state is CancelBookingSuccess) {
+          // Keep _isUpdating = true until BookingLoaded arrives with fresh data
+        } else if (state is BookingError) {
+          if (mounted) setState(() => _isUpdating = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(state.message),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
       },
       child: Scaffold(
@@ -140,9 +235,42 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
             _buildSectionTitle(context, 'Schedule & cost'),
             const SizedBox(height: 12),
             _buildScheduleBlock(theme),
+            if (_isConfirmedOrBeyond()) ...[
+              const SizedBox(height: 24),
+              _buildSectionTitle(context, 'Driver Activity'),
+              const SizedBox(height: 12),
+              _buildActivityTimeline(theme),
+            ],
             if (_canArrivedPickup() || _canStartBooking() || _canArrivedDropoff() || _canComplete()) ...[
               const SizedBox(height: 24),
-              _buildActionButtons(context, theme),
+              if (_isUpdating)
+                SizedBox(
+                  height: 52,
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Updating status...',
+                          style: AppFontManager.bodyMedium(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                          ).copyWith(fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                _buildActionButtons(context, theme),
             ],
           ],
         ),
@@ -171,7 +299,107 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
     return s == 'arrived_dropoff';
   }
 
-bool _hasCustomerOrVehicle() =>
+  bool _isConfirmedOrBeyond() {
+    const beyondPending = {'confirmed', 'arrived_pickup', 'ongoing', 'arrived_dropoff', 'completed'};
+    return beyondPending.contains(booking.status?.toLowerCase() ?? '');
+  }
+
+  static String formatTimestamp(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
+    final d = DateTime.tryParse(iso);
+    if (d == null) return iso;
+    final local = d.isUtc ? d.toLocal() : d;
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    final month = months[local.month - 1];
+    final day = local.day.toString().padLeft(2, '0');
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$month $day, ${local.year}  $hour:$minute';
+  }
+
+  Widget _buildActivityTimeline(ThemeData theme) {
+    final steps = <Map<String, String?>>[
+      {'label': 'Confirmed', 'time': booking.confirmedAt},
+      {'label': 'Arrived at Pickup', 'time': booking.arrivedPickupAt},
+      {'label': 'Start Delivery', 'time': booking.startedAt},
+      {'label': 'Arrived at Drop-off', 'time': booking.arrivedDropoffAt},
+      {'label': 'Completed', 'time': booking.completedAt},
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.onSurface.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: List.generate(steps.length, (i) {
+          final step = steps[i];
+          final isDone = step['time'] != null;
+          final isLast = i == steps.length - 1;
+          final dotColor = isDone ? Colors.green : theme.colorScheme.onSurface.withValues(alpha: 0.2);
+          final lineColor = isDone ? Colors.green.withValues(alpha: 0.4) : theme.colorScheme.onSurface.withValues(alpha: 0.1);
+          return IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Column(
+                  children: [
+                    Container(
+                      width: 12,
+                      height: 12,
+                      margin: const EdgeInsets.only(top: 3),
+                      decoration: BoxDecoration(
+                        color: dotColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    if (!isLast)
+                      Expanded(
+                        child: Container(
+                          width: 2,
+                          color: lineColor,
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: isLast ? 0 : 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          step['label']!,
+                          style: AppFontManager.bodyMedium(
+                            color: isDone
+                                ? theme.colorScheme.onSurface
+                                : theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                          ).copyWith(fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          isDone ? formatTimestamp(step['time']) : '—',
+                          style: AppFontManager.bodyMedium(
+                            color: theme.colorScheme.onSurface.withValues(alpha: isDone ? 0.55 : 0.3),
+                          ).copyWith(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  bool _hasCustomerOrVehicle() =>
       (booking.customerName != null && booking.customerName!.isNotEmpty) ||
       (booking.customerPhone != null && booking.customerPhone!.isNotEmpty) ||
       (booking.vehicleInfo != null && booking.vehicleInfo!.isNotEmpty);
@@ -244,6 +472,15 @@ bool _hasCustomerOrVehicle() =>
               Icons.directions_car_outlined,
               'Vehicle',
               booking.vehicleInfo!,
+              theme,
+            ),
+          ],
+          if (booking.notes != null && booking.notes!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _detailRow(
+              Icons.notes_outlined,
+              'Notes',
+              booking.notes!,
               theme,
             ),
           ],
@@ -334,6 +571,11 @@ bool _hasCustomerOrVehicle() =>
     return 'https://waze.com/ul?q=$encoded&navigate=yes';
   }
 
+  static String _googleMapsUrlForAddress(String address) {
+    final encoded = Uri.encodeQueryComponent(address);
+    return 'https://www.google.com/maps/dir/?api=1&destination=$encoded&travelmode=driving';
+  }
+
   Future<void> _openInWaze(BuildContext context, String address) async {
     final uri = Uri.tryParse(_wazeUrlForAddress(address));
     if (uri == null) return;
@@ -343,6 +585,20 @@ bool _hasCustomerOrVehicle() =>
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not open Waze')),
+        );
+      }
+    }
+  }
+
+  Future<void> _openInGoogleMaps(BuildContext context, String address) async {
+    final uri = Uri.tryParse(_googleMapsUrlForAddress(address));
+    if (uri == null) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Google Maps')),
         );
       }
     }
@@ -366,7 +622,8 @@ bool _hasCustomerOrVehicle() =>
               theme.colorScheme.primary,
               'Pickup',
               booking.pickupAddress!,
-              (BuildContext context) => _openInWaze(context, booking.pickupAddress!),
+              onOpenWaze: (BuildContext context) => _openInWaze(context, booking.pickupAddress!),
+              onOpenGoogleMaps: (BuildContext context) => _openInGoogleMaps(context, booking.pickupAddress!),
             ),
           if (booking.pickupAddress != null &&
               booking.pickupAddress!.isNotEmpty &&
@@ -383,7 +640,8 @@ bool _hasCustomerOrVehicle() =>
               AppColors.errorMuted,
               'Drop-off',
               booking.dropoffAddress!,
-              (BuildContext context) => _openInWaze(context, booking.dropoffAddress!),
+              onOpenWaze: (BuildContext context) => _openInWaze(context, booking.dropoffAddress!),
+              onOpenGoogleMaps: (BuildContext context) => _openInGoogleMaps(context, booking.dropoffAddress!),
             ),
         ],
       ),
@@ -395,9 +653,10 @@ bool _hasCustomerOrVehicle() =>
     IconData icon,
     Color iconColor,
     String label,
-    String address,
-    void Function(BuildContext) onOpenWaze,
-  ) {
+    String address, {
+    required void Function(BuildContext) onOpenWaze,
+    required void Function(BuildContext) onOpenGoogleMaps,
+  }) {
     return Builder(
       builder: (BuildContext context) {
         return Row(
@@ -421,23 +680,46 @@ bool _hasCustomerOrVehicle() =>
                         .copyWith(fontSize: 14),
                   ),
                   const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: () => onOpenWaze(context),
-                    icon: Icon(Icons.navigation_rounded, size: 18, color: Colors.blue),
-                    label: Text(
-                      'Open in Waze',
-                      style: TextStyle(
-                        color: Colors.blue,
-                        decoration: TextDecoration.underline,
-                        decorationColor: Colors.blue,
+                  Row(
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => onOpenWaze(context),
+                        icon: Icon(Icons.navigation_rounded, size: 18, color: Colors.blue),
+                        label: Text(
+                          'Waze',
+                          style: TextStyle(
+                            color: Colors.blue,
+                            decoration: TextDecoration.underline,
+                            decorationColor: Colors.blue,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          foregroundColor: Colors.blue,
+                        ),
                       ),
-                    ),
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      foregroundColor: Colors.blue,
-                    ),
+                      const SizedBox(width: 16),
+                      TextButton.icon(
+                        onPressed: () => onOpenGoogleMaps(context),
+                        icon: Icon(Icons.map_rounded, size: 18, color: Colors.green),
+                        label: Text(
+                          'Google Maps',
+                          style: TextStyle(
+                            color: Colors.green,
+                            decoration: TextDecoration.underline,
+                            decorationColor: Colors.green,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          foregroundColor: Colors.green,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -507,8 +789,122 @@ bool _hasCustomerOrVehicle() =>
                 ),
                 Text(
                   '₱${booking.estimatedCost}',
+                  style: AppFontManager.bodyMedium(color: theme.colorScheme.onSurface)
+                      .copyWith(fontSize: 14, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ],
+          if (booking.addOns.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Add Ons',
+              style: AppFontManager.bodyMedium(color: AppColors.errorMuted)
+                  .copyWith(fontSize: 12),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: booking.addOns.map((addon) {
+                final name = addon['name']?.toString() ?? '';
+                final price = addon['price'];
+                final label = price != null ? '$name  +₱$price' : name;
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    label,
+                    style: AppFontManager.bodyMedium(color: Colors.blue.shade700)
+                        .copyWith(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+          if (booking.estimatedCost != null && booking.estimatedCost!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Total',
+                  style: AppFontManager.bodyMedium(color: theme.colorScheme.onSurface)
+                      .copyWith(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  () {
+                    final base = double.tryParse(booking.estimatedCost ?? '0') ?? 0;
+                    final addOnsTotal = booking.addOns.fold<num>(
+                      0,
+                      (sum, a) => sum + ((a['price'] as num?) ?? 0),
+                    );
+                    return '₱${(base + addOnsTotal).toStringAsFixed(0)}';
+                  }(),
                   style: AppFontManager.bodyMedium(color: theme.colorScheme.primary)
-                      .copyWith(fontSize: 18, fontWeight: FontWeight.w700),
+                      .copyWith(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ],
+          if (_etaLoading || _etaFetched) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(Icons.access_time_rounded, size: 20, color: AppColors.errorMuted),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _etaLoading
+                      ? Text(
+                          'Calculating ETA...',
+                          style: AppFontManager.bodyMedium(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                          ).copyWith(fontSize: 14),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _etaLabel,
+                              style: AppFontManager.bodyMedium(
+                                color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
+                              ).copyWith(fontSize: 12),
+                            ),
+                            if (_eta != null)
+                              Text(
+                                _eta!.distance.isEmpty ? _eta!.duration : '${_eta!.duration}  ·  ${_eta!.distance}',
+                                style: AppFontManager.bodyMedium(color: theme.colorScheme.onSurface)
+                                    .copyWith(fontSize: 14, fontWeight: FontWeight.w600),
+                              )
+                            else
+                              GestureDetector(
+                                onTap: () {
+                                  setState(() { _etaFetched = false; });
+                                  _fetchEta();
+                                },
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'Tap to retry',
+                                      style: AppFontManager.bodyMedium(color: theme.colorScheme.primary)
+                                          .copyWith(fontSize: 13),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Icon(Icons.refresh_rounded, size: 14, color: theme.colorScheme.primary),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
                 ),
               ],
             ),
@@ -562,7 +958,10 @@ bool _hasCustomerOrVehicle() =>
         ],
       ),
     );
-    if (confirmed == true) onConfirm();
+    if (confirmed == true) {
+      setState(() => _isUpdating = true);
+      onConfirm();
+    }
   }
 
   Widget _buildActionButtons(BuildContext context, ThemeData theme) {
@@ -597,12 +996,12 @@ bool _hasCustomerOrVehicle() =>
           _buildFilledActionButton(
             context,
             icon: Icons.play_arrow_rounded,
-            label: 'Start towing',
+            label: 'Start delivery',
             color: const Color(0xFF2E7D32),
             onPressed: () => _confirmAction(
               context,
-              title: 'Start Towing?',
-              message: 'Confirm that you are starting the towing service now.',
+              title: 'Start Delivery?',
+              message: 'Confirm that you are starting the delivery now.',
               confirmColor: const Color(0xFF2E7D32),
               confirmLabel: 'Start',
               onConfirm: () {

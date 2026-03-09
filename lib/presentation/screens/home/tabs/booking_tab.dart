@@ -21,11 +21,19 @@ class BookingTab extends StatefulWidget {
   State<BookingTab> createState() => _BookingTabState();
 }
 
-class _BookingTabState extends State<BookingTab> {
+class _BookingTabState extends State<BookingTab> with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _maybeLoadBookings();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   void _maybeLoadBookings() {
@@ -52,6 +60,127 @@ class _BookingTabState extends State<BookingTab> {
     return trimmed;
   }
 
+  Widget _buildBookingList({
+    required BuildContext context,
+    required ThemeData theme,
+    required List<Booking> bookings,
+    required String? activeBookingId,
+    required bool hasMore,
+    required bool isLoadingMore,
+  }) {
+    final itemCount = bookings.isEmpty ? 1 : bookings.length + (hasMore ? 1 : 0);
+    return RefreshIndicator(
+      onRefresh: () async {
+        final sessionState = context.read<SessionBloc>().state;
+        if (sessionState is SessionAuthenticated) {
+          context.read<BookingBloc>().add(RefreshBookings(driverId: sessionState.user.id));
+        }
+      },
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        itemCount: itemCount,
+        itemBuilder: (BuildContext context, int index) {
+          if (bookings.isEmpty) {
+            return const Padding(
+              padding: EdgeInsets.only(top: 48),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.event_busy_rounded, size: 64, color: AppColors.errorMuted),
+                    SizedBox(height: 16),
+                    Text(
+                      'No bookings yet',
+                      style: TextStyle(color: AppColors.errorMuted),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          if (index == bookings.length) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: isLoadingMore
+                    ? const SizedBox(
+                        height: 32,
+                        width: 32,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : TextButton(
+                        onPressed: hasMore
+                            ? () {
+                                final sessionState = context.read<SessionBloc>().state;
+                                if (sessionState is SessionAuthenticated) {
+                                  context.read<BookingBloc>().add(
+                                        LoadMoreBookings(driverId: sessionState.user.id),
+                                      );
+                                }
+                              }
+                            : null,
+                        child: Text(hasMore ? 'Load more' : ''),
+                      ),
+              ),
+            );
+          }
+          final booking = bookings[index];
+          final isActive = activeBookingId != null && activeBookingId == booking.id;
+          final isPending = booking.status != null &&
+              booking.status!.toLowerCase() == 'pending';
+          final canAccept = isPending && (activeBookingId == null || activeBookingId == booking.id);
+          final activeBookingBlocked = isPending && activeBookingId != null && activeBookingId != booking.id;
+          return _BookingCard(
+            booking: booking,
+            theme: theme,
+            formatDate: _formatDate,
+            formatDistance: _formatDistance,
+            isActive: isActive,
+            isPending: isPending,
+            canAccept: canAccept,
+            activeBookingBlocked: activeBookingBlocked,
+            onTap: () => context.push('/booking/${booking.id}', extra: booking),
+            onAccept: canAccept
+                ? () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (ctx) => AlertDialog(
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        title: const Text('Accept Booking?',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        content: const Text(
+                            'Are you sure you want to accept this booking?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(false),
+                            child: const Text('Cancel',
+                                style: TextStyle(color: Colors.grey)),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.of(ctx).pop(true),
+                            child: const Text('Accept'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirmed == true) {
+                      final sessionState = context.read<SessionBloc>().state;
+                      if (sessionState is SessionAuthenticated) {
+                        context.read<BookingBloc>().add(AcceptBooking(
+                              bookingId: booking.id,
+                              driverId: sessionState.user.id,
+                            ));
+                      }
+                    }
+                  }
+                : null,
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -66,18 +195,11 @@ class _BookingTabState extends State<BookingTab> {
             ),
           );
         }
-        // Start/stop driver location tracking based on active booking
         if (state is BookingLoaded) {
           final locationService = sl<DriverLocationService>();
           final sessionState = context.read<SessionBloc>().state;
-          if (state.activeBookingId != null && sessionState is SessionAuthenticated) {
-            if (!locationService.isTracking) {
-              locationService.start(sessionState.user.id);
-            }
-          } else {
-            if (locationService.isTracking) {
-              locationService.stop();
-            }
+          if (sessionState is SessionAuthenticated && !locationService.isTracking) {
+            locationService.start(sessionState.user.id);
           }
         }
       },
@@ -113,122 +235,78 @@ class _BookingTabState extends State<BookingTab> {
             ),
           );
         }
-        final bookings = state is BookingLoaded ? state.bookings : <Booking>[];
+
+        final allBookings = state is BookingLoaded ? state.bookings : <Booking>[];
         final activeBookingId = state is BookingLoaded ? state.activeBookingId : null;
         final hasMore = state is BookingLoaded && state.hasMore;
         final isLoadingMore = state is BookingLoaded && state.isFetchingMore;
 
-        final itemCount = bookings.isEmpty ? 1 : bookings.length + (hasMore ? 1 : 0);
-        return RefreshIndicator(
-          onRefresh: () async {
-            final sessionState = context.read<SessionBloc>().state;
-            if (sessionState is SessionAuthenticated) {
-              context.read<BookingBloc>().add(RefreshBookings(driverId: sessionState.user.id));
-            }
-          },
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-            itemCount: itemCount,
-            itemBuilder: (BuildContext context, int index) {
-              if (bookings.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.only(top: 48),
-                  child: Center(
-                    child: Column(
+        final scheduledBookings = allBookings;
+        final priorityBookings = allBookings.where((b) => b.isPriority).toList();
+
+        return Column(
+          children: [
+            Container(
+              color: theme.colorScheme.surface,
+              child: TabBar(
+                controller: _tabController,
+                labelColor: theme.colorScheme.primary,
+                unselectedLabelColor: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                indicatorColor: theme.colorScheme.primary,
+                indicatorWeight: 3,
+                labelStyle: AppFontManager.bodyMedium(color: theme.colorScheme.primary)
+                    .copyWith(fontWeight: FontWeight.w700, fontSize: 14),
+                tabs: [
+                  const Tab(text: 'Scheduled'),
+                  Tab(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.event_busy_rounded, size: 64, color: AppColors.errorMuted),
-                        SizedBox(height: 16),
-                        Text(
-                          'No bookings yet',
-                          style: TextStyle(color: AppColors.errorMuted),
-                        ),
+                        const Text('Priority'),
+                        if (priorityBookings.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${priorityBookings.length}',
+                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
-                );
-              }
-              if (index == bookings.length) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: Center(
-                    child: isLoadingMore
-                        ? const SizedBox(
-                            height: 32,
-                            width: 32,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : TextButton(
-                            onPressed: hasMore
-                                ? () {
-                                    final sessionState = context.read<SessionBloc>().state;
-                                    if (sessionState is SessionAuthenticated) {
-                                      context.read<BookingBloc>().add(
-                                            LoadMoreBookings(driverId: sessionState.user.id),
-                                          );
-                                    }
-                                  }
-                                : null,
-                            child: Text(hasMore ? 'Load more' : ''),
-                          ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildBookingList(
+                    context: context,
+                    theme: theme,
+                    bookings: scheduledBookings,
+                    activeBookingId: activeBookingId,
+                    hasMore: hasMore,
+                    isLoadingMore: isLoadingMore,
                   ),
-                );
-              }
-              final booking = bookings[index];
-              final isActive = activeBookingId != null && activeBookingId == booking.id;
-              final isPending = booking.status != null &&
-                  booking.status!.toLowerCase() == 'pending';
-              final canAccept = isPending && (activeBookingId == null || activeBookingId == booking.id);
-              final activeBookingBlocked = isPending && activeBookingId != null && activeBookingId != booking.id;
-              return _BookingCard(
-                booking: booking,
-                theme: theme,
-                formatDate: _formatDate,
-                formatDistance: _formatDistance,
-                isActive: isActive,
-                isPending: isPending,
-                canAccept: canAccept,
-                activeBookingBlocked: activeBookingBlocked,
-                onTap: () => context.push('/booking/${booking.id}', extra: booking),
-                onAccept: canAccept
-                    ? () async {
-                        final confirmed = await showDialog<bool>(
-                          context: context,
-                          barrierDismissible: false,
-                          builder: (ctx) => AlertDialog(
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16)),
-                            title: const Text('Accept Booking?',
-                                style: TextStyle(fontWeight: FontWeight.bold)),
-                            content: const Text(
-                                'Are you sure you want to accept this booking?'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(ctx).pop(false),
-                                child: const Text('Cancel',
-                                    style: TextStyle(color: Colors.grey)),
-                              ),
-                              FilledButton(
-                                onPressed: () => Navigator.of(ctx).pop(true),
-                                child: const Text('Accept'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (confirmed == true) {
-                          final sessionState =
-                              context.read<SessionBloc>().state;
-                          if (sessionState is SessionAuthenticated) {
-                            context.read<BookingBloc>().add(AcceptBooking(
-                                  bookingId: booking.id,
-                                  driverId: sessionState.user.id,
-                                ));
-                          }
-                        }
-                      }
-                    : null,
-              );
-            },
-          ),
+                  _buildBookingList(
+                    context: context,
+                    theme: theme,
+                    bookings: priorityBookings,
+                    activeBookingId: activeBookingId,
+                    hasMore: false,
+                    isLoadingMore: false,
+                  ),
+                ],
+              ),
+            ),
+          ],
         );
       },
     );
@@ -310,6 +388,10 @@ class _BookingCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  if (booking.isPriority) ...[
+                    _buildChip('Priority', Colors.red, false),
+                    const SizedBox(width: 6),
+                  ],
                   if (isActive) _buildChip('Active', theme.colorScheme.primary, true),
                   if (isActive) const SizedBox(width: 6),
                   if (booking.status != null && booking.status!.isNotEmpty)

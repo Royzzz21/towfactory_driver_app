@@ -75,4 +75,14 @@ class BookingService {
     final path = AppConstraints.bookingCancelPath(bookingId);
     await _apiService.patch(path);
   }
+
+  /// PATCH /bookings/:id/eta. Saves ETA text to DB. Throws [ApiException] on failure.
+  Future<void> saveEta(String bookingId, {String? etaToPickup, String? etaToDropoff}) async {
+    final path = AppConstraints.bookingEtaPath(bookingId);
+    final body = json.encode(<String, String?>{
+      if (etaToPickup != null) 'etaToPickup': etaToPickup,
+      if (etaToDropoff != null) 'etaToDropoff': etaToDropoff,
+    });
+    await _apiService.patch(path, body: body);
+  }
 }

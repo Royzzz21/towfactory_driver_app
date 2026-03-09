@@ -37,6 +37,9 @@ class DriverLocationService {
   /// Whether location tracking (GPS) is currently active.
   bool get isTracking => _positionSub != null;
 
+  /// Last known driver position, or null if tracking has not started.
+  Position? get lastPosition => _lastPosition;
+
   /// Connect socket and join the driver notification room (no GPS).
   /// Safe to call multiple times — no-ops if already connected for same driver.
   Future<void> connect(String driverId) async {

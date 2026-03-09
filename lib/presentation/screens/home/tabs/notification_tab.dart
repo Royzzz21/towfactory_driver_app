@@ -23,12 +23,16 @@ class _NotificationTabState extends State<NotificationTab> {
     super.initState();
     _scrollCtrl.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final bloc = context.read<NotificationBloc>();
-      final state = bloc.state;
-      if (state is NotificationLoaded && state.unreadCount > 0) {
-        bloc.add(const MarkAllNotificationsRead());
-      }
+      _markAllReadIfLoaded();
     });
+  }
+
+  void _markAllReadIfLoaded() {
+    final bloc = context.read<NotificationBloc>();
+    final state = bloc.state;
+    if (state is NotificationLoaded && state.unreadCount > 0) {
+      bloc.add(const MarkAllNotificationsRead());
+    }
   }
 
   @override
@@ -45,7 +49,12 @@ class _NotificationTabState extends State<NotificationTab> {
 
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<NotificationBloc, NotificationState>(
+    return BlocConsumer<NotificationBloc, NotificationState>(
+      listener: (context, state) {
+        if (state is NotificationLoaded && state.unreadCount > 0) {
+          context.read<NotificationBloc>().add(const MarkAllNotificationsRead());
+        }
+      },
       builder: (context, state) {
         return Column(
           children: [
