@@ -207,7 +207,7 @@ class _BookingTabState extends State<BookingTab> with SingleTickerProviderStateM
         if (state is BookingLoading && !state.isLoadMore) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (state is AcceptBookingSuccess) {
+        if (state is AcceptBookingLoading || state is AcceptBookingSuccess) {
           return const Center(child: CircularProgressIndicator());
         }
         if (state is BookingError) {
@@ -500,46 +500,96 @@ class _BookingCard extends StatelessWidget {
               ],
               // Footer: date + distance + price
               const SizedBox(height: 16),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  if (booking.scheduledAt != null && booking.scheduledAt!.isNotEmpty)
+              Builder(builder: (context) {
+                final baseCost = double.tryParse(booking.estimatedCost ?? '') ?? 0;
+                final addOnsTotal = booking.addOns.fold<double>(
+                  0,
+                  (sum, a) => sum + (a['price'] is num ? (a['price'] as num).toDouble() : 0),
+                );
+                final total = baseCost + addOnsTotal;
+                final hasAddOns = addOnsTotal > 0;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Row(
-                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Icon(Icons.schedule_rounded, size: 16, color: AppColors.errorMuted),
-                        const SizedBox(width: 6),
-                        Text(
-                          formatDate(booking.scheduledAt),
-                          style: AppFontManager.bodyMedium(color: AppColors.errorMuted).copyWith(fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  if (booking.distance != null && booking.distance!.isNotEmpty) ...[
-                    const SizedBox(width: 16),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.straighten_rounded, size: 16, color: AppColors.errorMuted),
-                        const SizedBox(width: 4),
-                        Text(
-                          formatDistance(booking.distance),
-                          style: AppFontManager.bodyMedium(color: AppColors.errorMuted).copyWith(fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ],
-                  const Spacer(),
-                  if (booking.estimatedCost != null && booking.estimatedCost!.isNotEmpty)
-                    Text(
-                      '₱${booking.estimatedCost}',
-                      style: AppFontManager.bodyMedium(color: theme.colorScheme.primary).copyWith(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 18,
+                        if (booking.scheduledAt != null && booking.scheduledAt!.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.schedule_rounded, size: 16, color: AppColors.errorMuted),
+                              const SizedBox(width: 6),
+                              Text(
+                                formatDate(booking.scheduledAt),
+                                style: AppFontManager.bodyMedium(color: AppColors.errorMuted).copyWith(fontSize: 12),
+                              ),
+                            ],
                           ),
+                        if (booking.distance != null && booking.distance!.isNotEmpty) ...[
+                          const SizedBox(width: 16),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.straighten_rounded, size: 16, color: AppColors.errorMuted),
+                              const SizedBox(width: 4),
+                              Text(
+                                formatDistance(booking.distance),
+                                style: AppFontManager.bodyMedium(color: AppColors.errorMuted).copyWith(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ],
+                        const Spacer(),
+                        if (booking.estimatedCost != null && booking.estimatedCost!.isNotEmpty)
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if (hasAddOns)
+                                Text(
+                                  '₱${baseCost % 1 == 0 ? baseCost.toInt() : baseCost}',
+                                  style: AppFontManager.bodyMedium(color: AppColors.errorMuted).copyWith(
+                                    fontSize: 12,
+                                    decoration: TextDecoration.lineThrough,
+                                  ),
+                                ),
+                              Text(
+                                '₱${total % 1 == 0 ? total.toInt() : total}',
+                                style: AppFontManager.bodyMedium(color: theme.colorScheme.primary).copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 18,
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
                     ),
-                ],
-              ),
+                    if (hasAddOns) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: booking.addOns
+                            .where((a) => a['price'] is num && (a['price'] as num) > 0)
+                            .map((a) => Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    '+₱${(a['price'] as num).toInt()} ${a['name'] ?? ''}',
+                                    style: AppFontManager.bodyMedium(color: theme.colorScheme.primary)
+                                        .copyWith(fontSize: 11, fontWeight: FontWeight.w500),
+                                  ),
+                                ))
+                            .toList(),
+                      ),
+                    ],
+                  ],
+                );
+              }),
               // Message when pending but another booking is active
               if (activeBookingBlocked) ...[
                 const SizedBox(height: 16),
