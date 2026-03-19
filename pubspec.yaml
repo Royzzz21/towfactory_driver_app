@@ -75,6 +75,9 @@ dependencies:
   # GPS location (driver tracking)
   geolocator: ^13.0.2
 
+  # Skeleton loading shimmer effect
+  shimmer: ^3.0.0
+
   # Firebase (push notifications)
   firebase_core: ^3.13.1
   firebase_messaging: ^15.2.5

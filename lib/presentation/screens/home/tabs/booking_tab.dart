@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shimmer/shimmer.dart';
 
 import '../../../../core/di/service_locator.dart';
 import '../../../../core/theme/colors_manager.dart';
@@ -205,10 +206,10 @@ class _BookingTabState extends State<BookingTab> with SingleTickerProviderStateM
       },
       builder: (BuildContext context, BookingState state) {
         if (state is BookingLoading && !state.isLoadMore) {
-          return const Center(child: CircularProgressIndicator());
+          return _BookingSkeletonList(theme: theme);
         }
         if (state is AcceptBookingLoading || state is AcceptBookingSuccess) {
-          return const Center(child: CircularProgressIndicator());
+          return _BookingSkeletonList(theme: theme);
         }
         if (state is BookingError) {
           return Center(
@@ -313,6 +314,172 @@ class _BookingTabState extends State<BookingTab> with SingleTickerProviderStateM
   }
 }
 
+// ─── Skeleton loading ─────────────────────────────────────────────────────────
+
+class _BookingSkeletonList extends StatelessWidget {
+  const _BookingSkeletonList({required this.theme});
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer.fromColors(
+      baseColor: Colors.grey.shade300,
+      highlightColor: Colors.grey.shade100,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        itemCount: 3,
+        itemBuilder: (_, __) => _BookingSkeletonCard(theme: theme),
+      ),
+    );
+  }
+}
+
+class _BookingSkeletonCard extends StatelessWidget {
+  const _BookingSkeletonCard({required this.theme});
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 6,
+      shadowColor: Colors.black.withValues(alpha: 0.15),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
+      ),
+      color: theme.colorScheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header row: booking number + status chip
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    height: 16,
+                    width: 140,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+                Container(
+                  height: 24,
+                  width: 60,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            // Vehicle info row
+            Row(
+              children: [
+                Container(width: 20, height: 20, color: Colors.black),
+                const SizedBox(width: 6),
+                Container(
+                  height: 13,
+                  width: 60,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Route block
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(width: 20, height: 20, color: Colors.black),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Container(
+                          height: 13,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade300,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(width: 20, height: 20, color: Colors.black),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Container(
+                          height: 13,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade300,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Footer: date + distance + price
+            Row(
+              children: [
+                Container(
+                  height: 12,
+                  width: 110,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Container(
+                  height: 12,
+                  width: 60,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  height: 20,
+                  width: 70,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Booking card ─────────────────────────────────────────────────────────────
+
 class _BookingCard extends StatelessWidget {
   const _BookingCard({
     required this.booking,
@@ -343,12 +510,25 @@ class _BookingCard extends StatelessWidget {
   static const double _iconSize = 20;
 
   Color _statusColor(String status) {
-    final s = status.toLowerCase();
-    if (s == 'active' || s == 'in_progress' || s == 'in progress') return theme.colorScheme.primary;
-    if (s == 'confirmed') return theme.colorScheme.primary;
-    if (s == 'pending') return const Color(0xFFE65100); // amber/dark orange
-    if (s == 'completed' || s == 'cancelled') return AppColors.errorMuted;
-    return AppColors.errorMuted;
+    switch (status.toLowerCase()) {
+      case 'confirmed':
+        return const Color(0xFF047857); // emerald
+      case 'arrived_pickup':
+        return const Color(0xFF0369A1); // sky blue
+      case 'ongoing':
+        return const Color(0xFF6D28D9); // violet
+      case 'arrived_dropoff':
+        return const Color(0xFFBE123C); // rose
+      case 'pending':
+        return const Color(0xFFB45309); // amber
+      case 'completed':
+        return const Color(0xFF047857); // emerald
+      case 'cancelled':
+      case 'no_show':
+        return AppColors.errorMuted;
+      default:
+        return AppColors.errorMuted;
+    }
   }
 
   @override

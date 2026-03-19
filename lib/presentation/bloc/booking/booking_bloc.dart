@@ -86,6 +86,7 @@ class BookingBloc extends Bloc<BookingEvent, BookingState> {
     AcceptBooking event,
     Emitter<BookingState> emit,
   ) async {
+    emit(const AcceptBookingLoading());
     try {
       final result = await _repository.acceptBooking(event.bookingId);
       emit(AcceptBookingSuccess(result.message));

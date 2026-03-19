@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/di/service_locator.dart';
 import '../../../services/driver_location_service.dart';
+import '../../../services/notification_service.dart';
 import '../../bloc/booking/booking_bloc.dart';
 import '../../bloc/booking/booking_event.dart';
 import '../../bloc/notification/notification_bloc.dart';
@@ -33,13 +34,14 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _currentIndex = 0;
   StreamSubscription? _notifSub;
+  StreamSubscription? _fcmForegroundSub;
+
+  static const int _notifTabIndex = 2;
+  static const int _userTabIndex = 3;
 
   // Stable instances — created once so initState of each tab fires only once.
   static const _bookingTab = BookingTab();
   static const _chatTab = ChatTab();
-  static const _notificationTab = NotificationTab();
-
-  static const int _userTabIndex = 3;
 
   @override
   void initState() {
@@ -55,6 +57,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         locationService.start(session.user.id);
       }
     }
+
+    // Bridge FCM foreground messages → NotificationBloc (prepend + badge, no API call)
+    _fcmForegroundSub = sl<NotificationService>().foregroundMessageStream.listen((n) {
+      if (!mounted) return;
+      context.read<NotificationBloc>().add(NotificationReceivedFromSocket(n));
+    });
 
     // Bridge socket notifications → NotificationBloc
     // Also refetch bookings when a new booking is assigned via socket
@@ -74,6 +82,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _notifSub?.cancel();
+    _fcmForegroundSub?.cancel();
     super.dispose();
   }
 
@@ -138,7 +147,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         children: [
           _bookingTab,
           _chatTab,
-          _notificationTab,
+          NotificationTab(isSelected: _currentIndex == _notifTabIndex),
           UserTab(
             isSelected: _currentIndex == _userTabIndex,
             tabIndex: _userTabIndex,

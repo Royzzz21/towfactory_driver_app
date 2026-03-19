@@ -21,7 +21,9 @@ class NotificationBloc extends Bloc<NotificationEvent, NotificationState> {
     LoadNotifications event,
     Emitter<NotificationState> emit,
   ) async {
-    emit(const NotificationLoading());
+    // If already loaded, skip the Loading state so the badge doesn't flash to 0
+    final current = state;
+    if (current is! NotificationLoaded) emit(const NotificationLoading());
     try {
       final notifications = await _repository.getNotifications(page: 1, limit: _pageSize);
       final count = await _repository.unreadCount();

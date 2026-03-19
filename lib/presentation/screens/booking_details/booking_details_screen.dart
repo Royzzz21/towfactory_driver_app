@@ -142,15 +142,25 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
 
   static Color statusColor(String? status, ColorScheme scheme) {
     if (status == null || status.isEmpty) return AppColors.errorMuted;
-    final s = status.toLowerCase();
-    if (s == 'confirmed') return scheme.primary;
-    if (s == 'arrived_pickup') return const Color(0xFF1565C0);
-    if (s == 'ongoing' || s == 'active' || s == 'in_progress' || s == 'in progress') {
-      return const Color(0xFF2E7D32);
+    switch (status.toLowerCase()) {
+      case 'confirmed':
+        return const Color(0xFF047857); // emerald
+      case 'arrived_pickup':
+        return const Color(0xFF0369A1); // sky blue
+      case 'ongoing':
+      case 'active':
+      case 'in_progress':
+      case 'in progress':
+        return const Color(0xFF6D28D9); // violet
+      case 'arrived_dropoff':
+        return const Color(0xFFBE123C); // rose
+      case 'pending':
+        return const Color(0xFFB45309); // amber
+      case 'completed':
+        return const Color(0xFF047857); // emerald
+      default:
+        return AppColors.errorMuted;
     }
-    if (s == 'arrived_dropoff') return const Color(0xFF6A1B9A);
-    if (s == 'pending') return const Color(0xFFE65100);
-    return AppColors.errorMuted;
   }
 
   @override
@@ -843,7 +853,11 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                     final base = double.tryParse(booking.estimatedCost ?? '0') ?? 0;
                     final addOnsTotal = booking.addOns.fold<num>(
                       0,
-                      (sum, a) => sum + ((a['price'] as num?) ?? 0),
+                      (sum, a) {
+                        final p = a['price'];
+                        final price = p is num ? p : num.tryParse(p?.toString() ?? '') ?? 0;
+                        return sum + price;
+                      },
                     );
                     return '₱${(base + addOnsTotal).toStringAsFixed(0)}';
                   }(),

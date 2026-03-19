@@ -8,8 +8,13 @@ import '../../../bloc/notification/notification_state.dart';
 
 /// Full notification tab — shows paginated list with unread indicators,
 /// mark-all-read action, and pull-to-refresh.
+///
+/// [isSelected] must be true when this tab is actively visible so that
+/// unread notifications are only marked read when the user is actually here.
 class NotificationTab extends StatefulWidget {
-  const NotificationTab({super.key});
+  const NotificationTab({super.key, required this.isSelected});
+
+  final bool isSelected;
 
   @override
   State<NotificationTab> createState() => _NotificationTabState();
@@ -28,6 +33,7 @@ class _NotificationTabState extends State<NotificationTab> {
   }
 
   void _markAllReadIfLoaded() {
+    if (!widget.isSelected) return;
     final bloc = context.read<NotificationBloc>();
     final state = bloc.state;
     if (state is NotificationLoaded && state.unreadCount > 0) {
@@ -51,7 +57,7 @@ class _NotificationTabState extends State<NotificationTab> {
   Widget build(BuildContext context) {
     return BlocConsumer<NotificationBloc, NotificationState>(
       listener: (context, state) {
-        if (state is NotificationLoaded && state.unreadCount > 0) {
+        if (widget.isSelected && state is NotificationLoaded && state.unreadCount > 0) {
           context.read<NotificationBloc>().add(const MarkAllNotificationsRead());
         }
       },

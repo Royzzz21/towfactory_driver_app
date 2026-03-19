@@ -60,6 +60,11 @@ class BookingError extends BookingState {
   List<Object?> get props => [message];
 }
 
+/// Emitted while accept API call is in progress.
+class AcceptBookingLoading extends BookingState {
+  const AcceptBookingLoading();
+}
+
 /// Emitted after accept API success; UI can show [message] then list refreshes.
 class AcceptBookingSuccess extends BookingState {
   const AcceptBookingSuccess(this.message);
