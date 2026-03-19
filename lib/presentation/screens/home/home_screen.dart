@@ -35,6 +35,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _currentIndex = 0;
   StreamSubscription? _notifSub;
   StreamSubscription? _fcmForegroundSub;
+  StreamSubscription? _sessionSub;
 
   static const int _notifTabIndex = 2;
   static const int _userTabIndex = 3;
@@ -48,15 +49,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Connect socket and start GPS tracking immediately after login
-    final session = context.read<SessionBloc>().state;
-    if (session is SessionAuthenticated) {
-      final locationService = sl<DriverLocationService>();
-      locationService.connect(session.user.id);
-      if (!locationService.isTracking) {
-        locationService.start(session.user.id);
+    // Try to start immediately if session is already authenticated (login flow)
+    _tryStartLocationTracking();
+
+    // Also listen for SessionAuthenticated — covers the token-refresh/restore flow
+    // where CheckSession emits authenticated state after initState has already run.
+    _sessionSub = context.read<SessionBloc>().stream.listen((state) {
+      if (state is SessionAuthenticated) {
+        _tryStartLocationTracking(userId: state.user.id);
       }
-    }
+    });
 
     // Bridge FCM foreground messages → NotificationBloc (prepend + badge, no API call)
     _fcmForegroundSub = sl<NotificationService>().foregroundMessageStream.listen((n) {
@@ -78,11 +80,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
+  void _tryStartLocationTracking({String? userId}) {
+    final id = userId ?? (() {
+      final s = context.read<SessionBloc>().state;
+      return s is SessionAuthenticated ? s.user.id : null;
+    })();
+    if (id == null) return;
+    final locationService = sl<DriverLocationService>();
+    locationService.connect(id);
+    if (!locationService.isTracking) {
+      locationService.start(id);
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _notifSub?.cancel();
     _fcmForegroundSub?.cancel();
+    _sessionSub?.cancel();
     super.dispose();
   }
 
@@ -95,6 +111,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final sessionState = context.read<SessionBloc>().state;
       if (sessionState is SessionAuthenticated) {
         context.read<BookingBloc>().add(RefreshBookings(driverId: sessionState.user.id));
+        // Reconnect socket + restart GPS in case connection dropped while in background
+        _tryStartLocationTracking(userId: sessionState.user.id);
       }
     }
   }
